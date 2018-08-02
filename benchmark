@@ -1,0 +1,325 @@
+#!/usr/bin/python
+
+import argparse
+import subprocess
+import sys
+
+parser = argparse.ArgumentParser(description='The PocketData Benchmark for SQLite and Berkeley Db.')
+args = parser.parse_args()
+
+#android_id = "02c566fa093765eb" # Grant's main test phone
+#android_id = "ZX1G22TKW7" # Ed's old phone
+android_id = "199020104301402615" # Dragonboard 8074
+
+def help_message():
+	print '\nCommand List:\n'
+	print '	[bdb a] Workload A on Berkeley Db	[sql a] Workload A on SQLite'
+	print '	[bdb100 a] Workload A on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb b] Workload B on Berkeley Db	[sql b] Workload B on SQLite'
+	print '	[bdb100 b] Workload B on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb c] Workload C on Berkeley Db	[sql c] Workload C on SQLite'
+	print '	[bdb100 c] Workload C on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb d] Workload D on Berkeley Db	[sql d] Workload D on SQLite'
+	print '	[bdb100 d] Workload D on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb e] Workload E on Berkeley Db	[sql e] Workload E on SQLite'
+	print '	[bdb100 e] Workload E on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb f] Workload F on Berkeley Db	[sql f] Workload F on SQLite'
+	print '	[bdb100 f] Workload F on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb ia] Workload IA on Berkeley Db	[sql ia] Workload IA on SQLite'
+	print '	[bdb100 ia] Workload IA on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb ib] Workload IB on Berkeley Db	[sql ib] Workload IB on SQLite'
+	print '	[bdb100 ib] Workload IB on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb ic] Workload IC on Berkeley Db	[sql ic] Workload IC on SQLite'
+	print '	[bdb100 ic] Workload IC on Berkeley Db with 100MB Cache'
+	print
+	print '	[bdb all] All workloads on Berkeley Db'
+	print
+	print '	[bdb100 all] All workloads on Berkeley Db with 100MB Cache'
+	print
+	print '	[sql all] All workloads on SQLite'
+	print
+	print '	[all] All workloads, on all databases'
+	print
+	print '	[mutiple/multi/m] Brings up prompt to run multiple workloads at a time'
+	print
+	print '	[a/analytics] Brings up the analytics menu'
+	print
+	print '	[quit/q/exit] exits the program'
+	print
+
+def setup_app(name):
+	subprocess.call(['sh','scripts/setup/' + name + '.sh'])
+
+def command(string_array):
+
+	databases = ["SQL", "WAL", "BDB", "BDB100"]
+	workloads = ["A", "B", "C", "D", "E", "F", "IB", "IC"]
+	governors = ["performance", "interactive", "conservative", "ondemand", "userspace", "powersave"]
+	delays = ["0ms", "1ms", "lognormal"]
+
+	database = ""
+	workload = ""
+	#governor = "ondemand" # Nexus 5 default
+	governor = "interactive" # Nexus >= 6 default
+	delay = "lognormal"
+
+	database = string_array[0].upper()
+	workload = string_array[1].upper()
+
+	# Parameter validity check:
+	if ((database not in databases) or (workload not in workloads) or (governor not in governors) or (delay not in delays)):
+		print("Invalid benchmark request")
+		return 1
+	#end_if
+
+	print("Running " + database + " " + workload)
+	check = device_connected()
+	if (check == False):
+		print("No Device Connected!")
+		return 0
+	#end_if
+
+	print("setting up phone...")
+	subprocess.call(['sh', 'scripts/phone_setup.sh', android_id])
+	print("success")
+
+	print("building and installing app...")
+	subprocess.call(['sh', 'scripts/build.sh'])
+	print("success")
+
+	print("running...")
+	subprocess.call(['sh', 'scripts/run.sh', android_id, database, workload, governor, delay])
+	print("log is present in the logs directory.")
+
+	return 0
+
+#end_def
+	
+def device_connected():
+	temp_file = open("temp.txt",'w')
+	subprocess.call(['adb', 'devices'], stdout=temp_file, stderr=temp_file)
+	temp_file.close()
+	tester = 1
+	with open("temp.txt",'r') as log:
+		for line in log:
+			if 'device\n' in line:
+				tester = 0
+	subprocess.call(['rm', 'temp.txt'])
+	if tester == 1:
+		return False
+	else:
+		return True
+
+def multi_run():
+	print 'Please enter the desired workloads seperated by commas.'
+	input2 = raw_input('benchmark_mutli_run...$ ')
+	input2 = input2.split(',')
+	for string in input2:
+		stripped = string.strip()
+		try:
+			command(stripped.split())
+		except IndexError:
+			pass
+
+def run_analytics(command,dbtype,logname):
+	temp2_file = open("temp2.txt",'w')
+	subprocess.call(['zgrep', 'Workload', 'logs/'+logname], stdout=temp2_file, stderr=temp2_file)
+	temp2_file.close()
+	temp2_file = open("temp2.txt",'r')
+	info_file_name = ''
+	for line in temp2_file:
+		line = line.split('{"EVENT":"')[1].split('"}')
+		temp = line[0].split()
+		count = 0
+		for s in temp:
+			if count == len(temp) - 1:
+				# N.b. for WAL tracefiles, SQL is actual DB used (and recorded in key lines).
+				# Adjust save filename:
+				if ((dbtype == "WAL") and (s == "SQL")):
+					s = "WAL"
+				#end_if
+				info_file_name += s
+			else:
+				info_file_name += s + '_'
+			count += 1
+		break
+
+	temp2_file.close()
+
+	subprocess.call(['rm','temp2.txt'])
+	if command == 'sanity_check':
+		info_file_name += '.waiting_on_io_info'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running sanity checking script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findtimeblockedonio.py', dbtype, 'logs/' +logname], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	elif command == 'sanity_check-s':
+		info_file_name += '.waiting_on_io_summary'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running sanity checking summary script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findtimeblockedonio.py', dbtype, 'logs/' +logname, '--summary'], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	elif command == 'latency':
+		info_file_name += '.latency_info'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running latency script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findlatency2.py', dbtype, 'logs/' +logname], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	elif command == 'latency-s':
+		info_file_name += '.latency_summary'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running latency summary script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findlatency2.py', dbtype, 'logs/' +logname, '--summary'], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	elif command == 'time':
+		info_file_name += '.time_info'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running time script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findtime.py', dbtype, 'logs/' +logname], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	elif command == 'time-s':
+		info_file_name += '.time_summary'
+		save_file = open("logs/info/" + info_file_name,'w')
+		print 'running time summary script for ' + logname + '. please wait ...'
+		subprocess.call(['python', 'scripts/analytics/findtime.py', dbtype, 'logs/' +logname, '--summary'], stdout=save_file, stderr=save_file)
+		print 'complete'
+		save_file.close()
+	else:
+		print 'invalid command'
+
+def analytics(command):
+	if (command != 'sanity_check' and command != 'sanity_check-s' and
+	 command != 'latency' and command != 'latency-s' and
+	 command != 'time' and command != 'time-s'):
+		print 'invalid command'
+		return
+	temp_file = open("temp.txt",'w')
+	subprocess.call(['ls', 'logs/'], stdout=temp_file, stderr=temp_file)
+	temp_file.close()
+	temp_file = open("temp.txt",'r')
+	for logname in temp_file:
+		dbtype = ''
+		if 'sql' in logname:
+			dbtype = 'SQL'
+			run_analytics(command,dbtype,logname.split('\n')[0])
+		elif 'wal' in logname:
+			dbtype = 'WAL'
+			run_analytics(command,dbtype,logname.split('\n')[0])
+		elif 'bdb' in logname:
+			dbtype = 'BDB'
+			run_analytics(command,dbtype,logname.split('\n')[0])
+		elif 'info' in logname:
+			continue
+		else:
+			print 'invalid log file'
+			break
+	temp_file.close()
+	subprocess.call(['rm','temp.txt'])
+
+def analytics_menu():
+	print 'Please enter one of the following commands:'
+	print 'WARNING: (This will run on all logs present in the "logs" directory)'
+	print
+	print '	[sanity_check] Runs the sanity checking script (find time waiting for each IO)	[sanity_check-s] Summary of time waiting on IO'
+	print
+	print ' [latency] Runs the script for full info for all IO events	[latency-s] Summary of latency info'
+	print
+	print '	[time] Runs the script for full time info per each PID present during the workload	[time-s] Summary of times per PID'
+	print
+	print '	[quit/q/exit] exits the program'
+	print
+
+	while True:
+		input3 = raw_input('benchmark_analytics...$ ')
+		input3 = input3.split()
+		if input3[0].lower() == 'quit' or input3[0].lower() == 'exit' or input3[0].lower() == 'q':
+			break
+		else:
+			analytics(input3[0])
+		
+	
+
+def run_all(input_array):
+	if input_array[0] == 'bdb':
+		array = ['bdb a','bdb b','bdb c','bdb d','bdb e','bdb f','bdb ia','bdb ib','bdb ic']
+		for string in array:
+			command(string.split())
+	elif input_array[0] == 'sql':
+		array = ['sql a','sql b','sql c','sql d','sql e','sql f','sql ib','sql ic']
+		for string in array:
+			command(string.split())
+	elif input_array[0] == 'wal':
+		array = ['wal a','wal b','wal c','wal d','wal e','wal f','wal ia','wal ib','wal ic']
+		for string in array:
+			command(string.split())
+	elif input_array[0] == 'bdb100':
+		array = ['bdb100 a','bdb100 b','bdb100 c','bdb100 d','bdb100 e','bdb100 f','bdb100 ia','bdb100 ib','bdb100 ic']
+		for string in array:
+			command(string.split())
+	elif input_array[0] == 'all':
+		array = ['bdb100 a','bdb100 b','bdb100 c','bdb100 d','bdb100 e','bdb100 f','bdb100 ib','bdb100 ic','sql a','sql b','sql c','sql d','sql e','sql f','sql ib','sql ic','bdb a','bdb b','bdb c','bdb d','bdb e','bdb f','bdb ib','bdb ic']
+		for string in array:
+			command(string.split())
+
+	elif (input_array[0] == "only"):
+		workload = input_array[1]
+		array = ["sql " + workload, "wal " + workload, "bdb " + workload, "bdb100 " + workload]
+		for string in array:
+			command(string.split())
+		#end_for
+	
+	else:
+		print 'invalid command'
+
+while True:
+	input = raw_input('benchmark...$ ')
+	try:
+		input = input.split()
+		if input[0].lower() == 'quit' or input[0].lower() == 'exit' or input[0].lower() == 'q':
+			break
+
+		if input[0].lower() == 'mutiple' or input[0].lower() == 'multi' or input[0].lower() == 'm':
+			multi_run()
+			continue
+
+		if 'all' in input:
+			run_all(input)
+			continue
+
+		if ("only" in input):
+			run_all(input)
+		#end_if
+
+		if input[0].lower() == 'a' or input[0].lower() == 'analytics':
+			analytics_menu()
+			continue
+
+		if input[0].lower() == 'help' or input[0].lower() == 'menu':
+			help_message()
+			continue
+	except IndexError:
+		pass
+	code = 1
+	try:
+		code = command(input)
+	except IndexError:
+		pass
+	if code == 0:
+		continue
+	if code < 0:
+		print 'Program exited with error code: ' + str(code)
+		break
+	print 'invalid command'

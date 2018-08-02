@@ -1,0 +1,3 @@
+Before running the benchmark please plug in a nexus 5 phone. Untar the 'hammerhead_build.tar' file. and run 'sh flash_phone.sh'
+
+Please set the android sdk path (sdk.dir) in the 'local.properties' file in the 'config' directory, then run the 'config.sh' script before running the benchmark.
